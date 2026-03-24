@@ -311,72 +311,9 @@
 
 <script>
 let state = JSON.parse(localStorage.getItem('omr_pro_2026')) || { classes: [], students: [], gabaritos: [], corrections: [] };
-let detectedRawAnswers = {};
+let detectedRawAnswers = {}; 
 let reportChartInstance = null;
 let currentReportType = 'turma';
-let isSaving = false;
-let lastStateHash = '';
-
-function computeStateHash(s) {
-  return JSON.stringify(s).length + '_' + (s.classes.length + s.students.length + s.gabaritos.length + s.corrections.length);
-}
-
-async function loadStateFromServer() {
-  try {
-    const resp = await fetch('/api/data');
-    if (resp.ok) {
-      const serverState = await resp.json();
-      const hasData = serverState.classes.length || serverState.students.length || serverState.gabaritos.length || serverState.corrections.length;
-      if (hasData) {
-        state = serverState;
-        localStorage.setItem('omr_pro_2026', JSON.stringify(state));
-      } else {
-        const local = JSON.parse(localStorage.getItem('omr_pro_2026'));
-        if (local && (local.classes.length || local.students.length || local.gabaritos.length || local.corrections.length)) {
-          state = local;
-          await saveStateToServer();
-        }
-      }
-      lastStateHash = computeStateHash(state);
-    }
-  } catch (e) {
-    console.warn('Servidor indisponível, usando dados locais.', e);
-  }
-  updateStats();
-  render();
-}
-
-async function saveStateToServer() {
-  try {
-    await fetch('/api/data', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state)
-    });
-  } catch (e) {
-    console.warn('Erro ao salvar no servidor:', e);
-  }
-}
-
-async function pollServerUpdates() {
-  if (isSaving) return;
-  try {
-    const resp = await fetch('/api/data');
-    if (resp.ok) {
-      const serverState = await resp.json();
-      const serverHash = computeStateHash(serverState);
-      if (serverHash !== lastStateHash) {
-        state = serverState;
-        lastStateHash = serverHash;
-        localStorage.setItem('omr_pro_2026', JSON.stringify(state));
-        updateStats();
-        render();
-      }
-    }
-  } catch (e) { /* silently ignore polling errors */ }
-}
-
-setInterval(pollServerUpdates, 5000);
 
 const areaSubjects = {
     "Linguagens e Códigos": ["Português", "Educação Física", "Inglês", "Espanhol", "Artes", "Literatura"],
@@ -387,14 +324,7 @@ const areaSubjects = {
 
 const chartColors = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#64748B', '#111827'];
 
-function saveState() {
-  localStorage.setItem('omr_pro_2026', JSON.stringify(state));
-  lastStateHash = computeStateHash(state);
-  isSaving = true;
-  saveStateToServer().finally(() => { isSaving = false; });
-  updateStats();
-  render();
-}
+function saveState() { localStorage.setItem('omr_pro_2026', JSON.stringify(state)); updateStats(); render(); }
 function updateStats() {
   document.getElementById('stat-turmas').innerText = state.classes.length;
   document.getElementById('stat-alunos').innerText = state.students.length;
@@ -905,7 +835,7 @@ function saveClass() {
 }
 
 function notify(m) { const n = document.getElementById('notification'); n.innerText = m; n.style.display="block"; setTimeout(()=>n.style.display="none", 3000); }
-window.onload = function() { render(); loadStateFromServer(); };
+window.onload = render;
 
 /* BLOCO ADICIONAL: Correção da Importação de E-mails 
    Esta função substitui a original para garantir o mapeamento da coluna Email.
@@ -974,5 +904,39 @@ function limparFormularioEscaneamento() {
     };
 })();
 </script>
+  <!-- COLE AQUI -->
+  <div style="position:fixed;bottom:10px;right:10px;background:#fff;padding:10px;border:1px solid #ccc;border-radius:8px;">
+    <button onclick="exportarDados()">📥 Backup</button>
+    <input type="file" onchange="importarDados(event)">
+  </div>
+
+  <script>
+  function exportarDados() {
+    const dados = JSON.stringify(localStorage);
+    const blob = new Blob([dados], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "backup_omr.json";
+    link.click();
+  }
+
+  function importarDados(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+      const dados = JSON.parse(e.target.result);
+      for (let key in dados) {
+        localStorage.setItem(key, dados[key]);
+      }
+      alert("Dados restaurados!");
+      location.reload();
+    };
+
+    reader.readAsText(file);
+  }
+  </script>
+</body>
+</html>
 </body>
 </html>
