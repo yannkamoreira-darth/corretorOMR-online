@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CorretoOMR – Correção Automática de Provas</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root {
+    --primary: #4F46E5; --primary-dark: #3730A3; --primary-light: #EEF2FF;
+    --success: #10B981; --danger: #EF4444; --warning: #F59E0B;
+    --gray-50: #F9FAFB; --gray-100: #F3F4F6; --gray-200: #E5E7EB;
+    --gray-300: #D1D5DB; --gray-400: #9CA3AF; --gray-500: #6B7280;
+    --gray-600: #4B5563; --gray-700: #374151; --gray-800: #1F2937;
+    --gray-900: #111827; --radius: 12px;
+    --shadow: 0 4px 6px -1px rgba(0,0,0,0.1); --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--gray-50); color: var(--gray-800); min-height: 100vh; }
+  
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; background: var(--gray-900); color: white; display: flex; flex-direction: column; z-index: 100; transition: transform 0.3s; }
+  .sidebar-logo { padding: 24px 20px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .logo-icon { width: 40px; height: 40px; background: var(--primary); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .sidebar-logo h1 { font-size: 18px; font-weight: 700; color: white; }
+  .sidebar-nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+  .nav-section { font-size: 10px; text-transform: uppercase; color: var(--gray-500); padding: 8px 8px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; color: var(--gray-300); font-size: 14px; transition: 0.15s; margin-bottom: 2px; }
+  .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
+  .nav-item.active { background: var(--primary); color: white; }
+  
+  .main { margin-left: 240px; min-height: 100vh; }
+  .topbar { background: white; border-bottom: 1px solid var(--gray-200); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; }
+  .content { padding: 32px; }
+  
+  .card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--gray-200); overflow: hidden; margin-bottom: 24px; }
+  .card-header { padding: 20px 24px; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; justify-content: space-between; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: 0.15s; }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-outline { background: white; color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+  
+  .form-control { width: 100%; padding: 9px 12px; border: 1px solid var(--gray-300); border-radius: 8px; font-size: 14px; margin-bottom: 10px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: white; border-radius: 16px; width: 100%; max-width: 700px; max-height: 90vh; overflow-y: auto; padding: 24px; }
+
+  .class-card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 20px; cursor: pointer; transition: 0.15s; position: relative; overflow: hidden; border-top: 5px solid var(--primary); margin-bottom: 10px; }
+
+  #omr-preview { max-width: 100%; border-radius: 8px; display: none; margin-top: 10px; border: 2px solid var(--primary); }
+  .bubble-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 5px; border-radius: 6px; background: var(--gray-50); }
+  .bubble-group { display: flex; gap: 5px; }
+  .bubble { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #ccc; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; background: white; }
+  .bubble:hover { border-color: var(--primary); background: var(--primary-light); }
+  .bubble.selected { background: #333; color: white; border-color: #333; }
+  .bubble.correct { background: var(--success); border-color: var(--success); color: white; }
+  .bubble.wrong { background: var(--danger); border-color: var(--danger); color: white; }
+  
+  .gab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 15px; }
+  .notification { position: fixed; top: 20px; right: 20px; z-index: 9999; background: var(--gray-900); color: white; padding: 14px 20px; border-radius: 10px; display: none; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--gray-100); }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="logo-icon">📝</div><h1>CorretoOMR</h1></div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">Principal</div>
+    <div class="nav-item active" onclick="navigate('dashboard')">📊 Dashboard</div>
+    <div class="nav-item" onclick="navigate('scan')">📷 Escanear Prova</div>
+    
+    <div class="nav-section" style="margin-top:12px">Gerenciar</div>
+    <div class="nav-item" onclick="navigate('classes')">🏫 Turmas</div>
+    <div class="nav-item" onclick="navigate('gabaritos')">📋 Gabaritos</div>
+    <div class="nav-item" onclick="navigate('students')">👨‍🎓 Alunos</div>
+
+    <div class="nav-section" style="margin-top:12px">Resultados</div>
+    <div class="nav-item" onclick="navigate('results')">✅ Correções</div>
+    <div class="nav-item" onclick="navigate('reports')">📈 Relatórios</div>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar"><h2 id="page-title">Dashboard</h2><div id="topbar-actions"></div></div>
+  <div class="content">
+    
+    <div class="page active" id="page-dashboard">
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px;">
+        <div class="card" style="padding:20px"><h3>Turmas</h3><h2 id="stat-turmas">0</h2></div>
+        <div class="card" style="padding:20px"><h3>Alunos</h3><h2 id="stat-alunos">0</h2></div>
+        <div class="card" style="padding:20px"><h3>Relatórios</h3><h2 id="stat-correcoes">0</h2></div>
+        <div class="card" style="padding:20px"><h3>Máscaras</h3><h2 id="stat-gabaritos">0</h2></div>
+      </div>
+    </div>
+
+    <div class="page" id="page-scan">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items: start;">
+        <div class="card">
+          <div class="card-header"><h3>📸 1. Escanear Gabarito</h3></div>
+          <div class="card-body">
+            <input type="file" id="file-input" class="form-control" onchange="handleImageUpload(event)">
+            <div id="omr-status" style="margin-top:10px; font-weight:bold; color: var(--primary);">Selecione a foto da prova...</div>
+            <img id="omr-preview">
+            <canvas id="omr-canvas" style="display:none"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>✍️ 2. Conferência e Edição</h3></div>
+          <div class="card-body">
+            <label>Filtrar Turma:</label>
+            <select class="form-control" id="scan-class-filter" onchange="filterStudentsByClass()"></select>
+
+            <label>Aluno:</label>
+            <select class="form-control" id="scan-student-select"></select>
+
+            <label>Máscara de Respostas:</label>
+            <select class="form-control" id="scan-gabarito-select" onchange="executarProcessamentoReal()"></select>
+            
+            <div style="background: var(--warning); padding: 8px; border-radius: 6px; font-size: 11px; margin-bottom: 10px; color: #856404;">
+                💡 Se a leitura falhar, <b>clique na letra correta</b> na lista abaixo para ajustar.
+            </div>
+
+            <div id="bubble-sheet-container" style="max-height:400px; overflow-y:auto; border: 1px solid #eee; padding: 10px; border-radius: 8px;"></div>
+            
+            <div id="score-result" style="margin-top:15px; font-weight:bold; font-size:18px; text-align:center; color:var(--primary)"></div>
+            <button id="btn-save" class="btn btn-primary" style="width:100%; margin-top:15px; display:none" onclick="salvarResultadoFinal()">💾 Confirmar e Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-students">
+      <div class="card">
+        <div class="card-header">
+          <h3>👨‍🎓 Gestão de Alunos</h3>
+          <div style="display:flex; gap:10px">
+            <button class="btn btn-primary btn-sm" onclick="openStudentModal()">+ Novo Aluno</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadStudentTemplate()">📥 Baixar Modelo</button>
+            <button class="btn btn-outline btn-sm" onclick="deleteStudentsByClass()">🗑️ Excluir por Turma</button>
+            <button class="btn btn-outline btn-sm" onclick="deleteAllStudents()">🗑️ Limpar Todos</button>
+            <label class="btn btn-primary btn-sm">📥 Importar Excel<input type="file" style="display:none" onchange="importStudentsExcel(event)"></label>
+          </div>
+        </div>
+        <table>
+          <thead><tr style="text-align:left; background:var(--gray-50)"><th style="padding:15px">Nome Completo</th><th>Matrícula</th><th>Turma</th><th>Email</th><th style="text-align:center">Ação</th></tr></thead>
+          <tbody id="students-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="page" id="page-classes">
+        <div style="margin-bottom: 20px; display: flex; justify-content: flex-end; gap:10px;">
+            <button class="btn btn-danger" onclick="deleteAllClasses()">🗑️ Limpar Todas</button>
+            <button class="btn btn-primary" onclick="openClassModal()">+ Nova Turma</button>
+        </div>
+        <div id="classes-grid" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px;"></div>
+    </div>
+
+    <div class="page" id="page-gabaritos">
+        <div class="card">
+            <div class="card-header">
+                <h3>📋 Configurar Máscaras</h3>
+                <div style="display:flex; gap:10px">
+                  <button class="btn btn-danger btn-sm" onclick="deleteAllGabaritos()">🗑️ Limpar Todos</button>
+                  <button class="btn btn-outline btn-sm" onclick="openLayoutModal()">🖨️ Gerar Gabarito PDF</button>
+                  <button class="btn btn-primary btn-sm" onclick="openGabaritoModal()">+ Nova Máscara</button>
+                </div>
+            </div>
+            <div id="gabaritos-list" style="padding:20px; display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:20px"></div>
+        </div>
+    </div>
+
+    <div class="page" id="page-results">
+        <div class="card">
+            <div class="card-header">
+                <h3>📈 Histórico de Notas</h3>
+                <div style="display:flex; gap:10px">
+                    <button class="btn btn-danger btn-sm" onclick="clearAllCorrections()">🗑️ Limpar Todo Histórico</button>
+                </div>
+            </div>
+            <table style="width:100%; border-collapse: collapse;">
+                <thead><tr style="text-align:left; background:var(--gray-50)"><th style="padding:15px">Aluno</th><th>Gabarito</th><th>Nota</th><th>Data</th><th>Ações</th></tr></thead>
+                <tbody id="results-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="page" id="page-reports">
+        <div class="card">
+            <div class="card-header">
+                <h3>📊 Relatório de Desempenho</h3>
+                <div style="display:flex; gap:10px">
+                  <select id="report-gab-filter" class="form-control" style="width:200px; margin-bottom:0" onchange="renderReportTable(currentReportType)">
+                    <option value="">Todas as Provas</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" onclick="exportReportsExcel()">📥 Baixar Excel</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div style="display:flex; gap:10px; margin-bottom: 20px;">
+                    <button class="btn btn-outline" onclick="renderReportTable('turma')">Por Turma</button>
+                    <button class="btn btn-outline" onclick="renderReportTable('aluno')">Por Aluno</button>
+                    <button class="btn btn-outline" onclick="renderReportTable('questao')">Por Gabarito</button>
+                </div>
+                <div id="reports-container" style="overflow-x: auto;"></div>
+                <div style="margin-top:30px; height: 350px; background: #fff; padding: 15px; border-radius: 8px;">
+                    <canvas id="report-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-gabarito">
+  <div class="modal">
+    <h3>⚙️ Cadastrar Máscara</h3>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px">
+        <div><label>Nome da Prova</label><input type="text" id="gab-name" class="form-control"></div>
+        <div><label>Turma Aplicada</label><select id="gab-class" class="form-control"></select></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px">
+        <div>
+            <label>Área do Conhecimento</label>
+            <select id="gab-area" class="form-control" onchange="updateSubjectOptions()">
+                <option value="">Selecione a área...</option>
+                <option value="Linguagens e Códigos">Linguagens e Códigos</option>
+                <option value="Ciências Humanas">Ciências Humanas</option>
+                <option value="Ciências da Natureza">Ciências da Natureza</option>
+                <option value="Matemática">Matemática</option>
+            </select>
+        </div>
+        <div><label>Disciplina</label><select id="gab-subject-select" class="form-control"></select></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1.5fr 1fr 1fr; gap:15px">
+        <div><label>Nota Máxima</label><select id="gab-max-score" class="form-control"></select></div>
+        <div><label>Questões</label><input type="number" id="gab-num" class="form-control" value="10" oninput="generateGabGrid()"></div>
+        <div><label>Modelo</label><select id="gab-model" class="form-control" onchange="generateGabGrid()"><option value="4">A-D</option><option value="5" selected>A-E</option></select></div>
+    </div>
+    <div id="gab-questions-grid" class="gab-grid"></div>
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px"><button class="btn btn-outline" onclick="closeModal('modal-gabarito')">Cancelar</button><button class="btn btn-primary" onclick="saveGabarito()">💾 Salvar</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-layout-pdf">
+    <div class="modal">
+      <h3>🖨️ Configurar Folha de Respostas</h3>
+      <p style="font-size: 13px; color: #666; margin-bottom: 15px;">Defina as configurações para gerar o arquivo PDF pronto para impressão.</p>
+      <label>Quantidade de Questões (1 a 90):</label>
+      <input type="number" id="layout-num-questions" class="form-control" value="10" min="1" max="90">
+      <label>Modelo de Alternativas:</label>
+      <select id="layout-model" class="form-control">
+          <option value="4">A até D</option>
+          <option value="5" selected>A até E</option>
+      </select>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px">
+          <button class="btn btn-outline" onclick="closeModal('modal-layout-pdf')">Cancelar</button>
+          <button class="btn btn-primary" onclick="downloadAnswerSheet()">📥 Baixar PDF</button>
+      </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modal-class">
+  <div class="modal">
+    <h3>✏️ Editar Turma</h3>
+    <input type="hidden" id="edit-class-id">
+    <label>Nome da Turma</label><input type="text" id="class-name" class="form-control" placeholder="Ex: 3º Ano A">
+    <label>Cor Identificadora</label><input type="color" id="class-color" class="form-control" style="height:50px">
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px"><button class="btn btn-outline" onclick="closeModal('modal-class')">Cancelar</button><button class="btn btn-primary" onclick="saveClass()">Salvar</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-student">
+    <div class="modal">
+      <h3>👨‍🎓 Cadastrar Aluno Manualmente</h3>
+      <label>Nome Completo</label><input type="text" id="std-name" class="form-control">
+      <label>Matrícula</label><input type="text" id="std-id" class="form-control">
+      <label>Turma</label><select id="std-class" class="form-control"></select>
+      <label>Email</label><input type="email" id="std-email" class="form-control">
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px">
+          <button class="btn btn-outline" onclick="closeModal('modal-student')">Cancelar</button>
+          <button class="btn btn-primary" onclick="saveStudent()">Salvar Aluno</button>
+      </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modal-edit-correction">
+    <div class="modal">
+        <h3>✏️ Editar Nota</h3>
+        <input type="hidden" id="edit-corr-id">
+        <label>Aluno</label><input type="text" id="edit-corr-student" class="form-control" disabled>
+        <label>Nova Nota</label><input type="number" id="edit-corr-nota" class="form-control" step="0.1" min="0">
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px">
+            <button class="btn btn-outline" onclick="closeModal('modal-edit-correction')">Cancelar</button>
+            <button class="btn btn-primary" onclick="saveCorrectionEdit()">Salvar</button>
+        </div>
+    </div>
+</div>
+
+<div id="notification" class="notification"></div>
+
+<script>
+let state = JSON.parse(localStorage.getItem('omr_pro_2026')) || { classes: [], students: [], gabaritos: [], corrections: [] };
+let detectedRawAnswers = {};
+let reportChartInstance = null;
+let currentReportType = 'turma';
+let isSaving = false;
+let lastStateHash = '';
+
+function computeStateHash(s) {
+  return JSON.stringify(s).length + '_' + (s.classes.length + s.students.length + s.gabaritos.length + s.corrections.length);
+}
+
+async function loadStateFromServer() {
+  try {
+    const resp = await fetch('/api/data');
+    if (resp.ok) {
+      const serverState = await resp.json();
+      const hasData = serverState.classes.length || serverState.students.length || serverState.gabaritos.length || serverState.corrections.length;
+      if (hasData) {
+        state = serverState;
+        localStorage.setItem('omr_pro_2026', JSON.stringify(state));
+      } else {
+        const local = JSON.parse(localStorage.getItem('omr_pro_2026'));
+        if (local && (local.classes.length || local.students.length || local.gabaritos.length || local.corrections.length)) {
+          state = local;
+          await saveStateToServer();
+        }
+      }
+      lastStateHash = computeStateHash(state);
+    }
+  } catch (e) {
+    console.warn('Servidor indisponível, usando dados locais.', e);
+  }
+  updateStats();
+  render();
+}
+
+async function saveStateToServer() {
+  try {
+    await fetch('/api/data', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+  } catch (e) {
+    console.warn('Erro ao salvar no servidor:', e);
+  }
+}
+
+async function pollServerUpdates() {
+  if (isSaving) return;
+  try {
+    const resp = await fetch('/api/data');
+    if (resp.ok) {
+      const serverState = await resp.json();
+      const serverHash = computeStateHash(serverState);
+      if (serverHash !== lastStateHash) {
+        state = serverState;
+        lastStateHash = serverHash;
+        localStorage.setItem('omr_pro_2026', JSON.stringify(state));
+        updateStats();
+        render();
+      }
+    }
+  } catch (e) { /* silently ignore polling errors */ }
+}
+
+setInterval(pollServerUpdates, 5000);
+
+const areaSubjects = {
+    "Linguagens e Códigos": ["Português", "Educação Física", "Inglês", "Espanhol", "Artes", "Literatura"],
+    "Ciências Humanas": ["Geografia", "História", "Sociologia", "Filosofia"],
+    "Ciências da Natureza": ["Física", "Química", "Biologia"],
+    "Matemática": ["Matemática"]
+};
+
+const chartColors = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#64748B', '#111827'];
+
+function saveState() {
+  localStorage.setItem('omr_pro_2026', JSON.stringify(state));
+  lastStateHash = computeStateHash(state);
+  isSaving = true;
+  saveStateToServer().finally(() => { isSaving = false; });
+  updateStats();
+  render();
+}
+function updateStats() {
+  document.getElementById('stat-turmas').innerText = state.classes.length;
+  document.getElementById('stat-alunos').innerText = state.students.length;
+  document.getElementById('stat-correcoes').innerText = state.corrections.length;
+  document.getElementById('stat-gabaritos').innerText = state.gabaritos.length;
+}
+
+function updateSubjectOptions() {
+    const area = document.getElementById('gab-area').value;
+    const select = document.getElementById('gab-subject-select');
+    select.innerHTML = '';
+    if(area && areaSubjects[area]) {
+        areaSubjects[area].forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.innerText = s; select.appendChild(opt);
+        });
+    }
+}
+
+function filterStudentsByClass() {
+    const turma = document.getElementById('scan-class-filter').value;
+    const select = document.getElementById('scan-student-select');
+    let alunos = state.students;
+    if(turma) alunos = state.students.filter(s => s.turma === turma);
+    select.innerHTML = '<option value="">Selecione o aluno...</option>' + alunos.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+}
+
+function handleImageUpload(e) {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const cvs = document.getElementById('omr-canvas');
+      const ctx = cvs.getContext('2d');
+      cvs.width = img.width; cvs.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0,0,cvs.width, cvs.height);
+      const d = imgData.data;
+      for (let i=0; i<d.length; i+=4) {
+        let brightness = (d[i]+d[i+1]+d[i+2])/3;
+        d[i]=d[i+1]=d[i+2] = brightness < 128 ? 0 : 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const qr = jsQR(imgData.data, cvs.width, cvs.height);
+      if(qr) {
+          const al = state.students.find(s => s.matricula == qr.data);
+          if(al) {
+              document.getElementById('scan-class-filter').value = al.turma;
+              filterStudentsByClass();
+              document.getElementById('scan-student-select').value = al.name;
+          }
+      }
+      document.getElementById('omr-status').innerText = "✅ Processando leitura da imagem...";
+      analisarPixels(cvs, ctx);
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(e.target.files[0]);
+}
+
+function analisarPixels(canvas, ctx) {
+    const gabId = document.getElementById('scan-gabarito-select').value;
+    const gab = state.gabaritos.find(g => g.id == gabId) || {numQuestions: 10, model: 5};
+    const numQ = parseInt(gab.numQuestions);
+    const model = parseInt(gab.model);
+    const letters = ['A','B','C','D','E'];
+    detectedRawAnswers = {};
+    const w = canvas.width; const h = canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    ctx.lineWidth = 3; ctx.strokeStyle = "#3b82f6"; ctx.fillStyle = "rgba(16, 185, 129, 0.4)";
+    let visited = new Uint8Array(w * h); let blobs = [];
+    for (let y = 0; y < h; y += 4) {
+        for (let x = 0; x < w; x += 4) {
+            let idx = y * w + x;
+            if (data[idx * 4] === 0 && visited[idx] === 0) {
+                let stack = [idx]; visited[idx] = 1;
+                let minX = x, maxX = x, minY = y, maxY = y; let count = 0;
+                while (stack.length > 0) {
+                    let curr = stack.pop(); let cx = curr % w; let cy = Math.floor(curr / w); count++;
+                    if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+                    if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+                    let neighbors = [curr - 1, curr + 1, curr - w, curr + w];
+                    for (let n of neighbors) {
+                        if (n >= 0 && n < w * h && data[n * 4] === 0 && visited[n] === 0) {
+                            if (Math.abs((n % w) - (curr % w)) > 1) continue;
+                            visited[n] = 1; stack.push(n);
+                        }
+                    }
+                    if(count > 1000) break;
+                }
+                let bw = maxX - minX; let bh = maxY - minY; let ratio = bw / (bh || 1);
+                if (bw > 10 && bw < 120 && bh > 10 && bh < 120 && ratio > 0.6 && ratio < 1.6) {
+                    blobs.push({ x: minX, y: minY, w: bw, h: bh, cx: minX + bw/2, cy: minY + bh/2 });
+                }
+            }
+        }
+    }
+    if (blobs.length > 0) {
+        blobs.sort((a, b) => a.cy - b.cy);
+        let rows = []; let currentRow = [blobs[0]];
+        for (let i = 1; i < blobs.length; i++) {
+            if (Math.abs(blobs[i].cy - currentRow[0].cy) < 25) { currentRow.push(blobs[i]); } 
+            else { rows.push(currentRow); currentRow = [blobs[i]]; }
+        }
+        rows.push(currentRow);
+        let validRows = rows.filter(r => r.length >= 2);
+        if (validRows.length > numQ) validRows = validRows.slice(-numQ);
+        validRows.forEach((row, rowIndex) => {
+            let qNum = rowIndex + 1; row.sort((a, b) => a.cx - b.cx);
+            let options = row.slice(0, model); let maxDarkness = -1; let choice = "";
+            options.forEach((bubble, optIndex) => {
+                ctx.strokeRect(bubble.x, bubble.y, bubble.w, bubble.h); 
+                let innerDark = 0; let r = Math.floor(bubble.w * 0.2); 
+                for (let dy = Math.floor(bubble.cy - r); dy <= Math.floor(bubble.cy + r); dy++) {
+                    for (let dx = Math.floor(bubble.cx - r); dx <= Math.floor(bubble.cx + r); dx++) {
+                        if (data[(dy * w + dx) * 4] === 0) innerDark++;
+                    }
+                }
+                if (innerDark > maxDarkness && innerDark > (r * r)) { maxDarkness = innerDark; choice = letters[optIndex]; }
+            });
+            if(choice) {
+                let best = options[letters.indexOf(choice)];
+                ctx.fillRect(best.x, best.y, best.w, best.h);
+            }
+            detectedRawAnswers[qNum] = choice;
+        });
+        document.getElementById('omr-status').innerText = "✅ IA visual identificou as bolhas. Verifique ao lado!";
+    }
+    document.getElementById('omr-preview').src = canvas.toDataURL();
+    document.getElementById('omr-preview').style.display = "block";
+    executarProcessamentoReal();
+}
+
+function executarProcessamentoReal() {
+    const gab = state.gabaritos.find(g => g.id == document.getElementById('scan-gabarito-select').value);
+    const cont = document.getElementById('bubble-sheet-container');
+    if(!gab) { cont.innerHTML = "Selecione uma máscara."; return; }
+    let acertos = 0; let html = "";
+    const letters = ['A','B','C','D','E'].slice(0, gab.model);
+    Object.keys(gab.answers).forEach(q => {
+        const correta = gab.answers[q]; const aluno = detectedRawAnswers[q] || "";
+        if(aluno === correta && aluno !== "") acertos++;
+        html += `<div class="bubble-row"><span style="width:25px; font-weight:bold">${q}</span><div class="bubble-group">${letters.map(l => `<div class="bubble ${aluno === l ? (l === correta ? 'correct' : 'wrong') : ''}" onclick="manualAdjust(${q}, '${l}')">${l}</div>`).join('')}</div><small style="margin-left:10px; color:#666">Masc: <b>${correta}</b></small></div>`;
+    });
+    cont.innerHTML = html;
+    document.getElementById('score-result').innerText = `ACERTOS: ${acertos} de ${gab.numQuestions}`;
+    document.getElementById('btn-save').style.display = "block";
+}
+
+function manualAdjust(q, letter) { detectedRawAnswers[q] = letter; executarProcessamentoReal(); notify("Resposta da Q" + q + " alterada", "info"); }
+
+function salvarResultadoFinal() {
+    const al = document.getElementById('scan-student-select').value;
+    const gab = state.gabaritos.find(g => g.id == document.getElementById('scan-gabarito-select').value);
+    if(!al) return alert("Escolha o aluno.");
+    let ac = 0; Object.keys(gab.answers).forEach(q => { if(detectedRawAnswers[q] === gab.answers[q]) ac++; });
+    state.corrections.push({ 
+        id: Date.now(), studentName: al, gabName: gab.name, gabId: gab.id,
+        acertos: ac, total: gab.numQuestions, nota: ((ac/gab.numQuestions)*gab.maxScore).toFixed(1), 
+        data: new Date().toLocaleDateString(), answers: {...detectedRawAnswers} 
+    });
+    saveState(); notify("Resultado Salvo!"); navigate('results');
+}
+
+function exportStudentPDF(id) {
+    const { jsPDF } = window.jspdf; const doc = new jsPDF();
+    const corr = state.corrections.find(c => c.id == id);
+    const gab = state.gabaritos.find(g => g.id == corr.gabId);
+    if(!corr || !gab) return alert("Erro ao carregar dados.");
+    const provaCompleta = `${corr.gabName} (${gab.subject || 'Geral'})`;
+    doc.setFontSize(22); doc.setTextColor(79, 70, 229); doc.text("CorretoOMR - Comprovante de Nota", 20, 20);
+    doc.setFontSize(12); doc.setTextColor(0, 0, 0); 
+    doc.text(`Aluno: ${corr.studentName}`, 20, 35);
+    doc.text(`Avaliação: ${provaCompleta}`, 20, 42); 
+    doc.text(`Data: ${corr.data}`, 20, 49);
+    doc.setFontSize(16); doc.text(`NOTA FINAL: ${corr.nota}`, 140, 42);
+    const rows = [];
+    Object.keys(gab.answers).forEach(q => {
+        const respAluno = corr.answers ? corr.answers[q] : "-";
+        const respCorreta = gab.answers[q];
+        const status = respAluno === respCorreta ? "Correto" : "Incorreto";
+        rows.push([q, respCorreta, respAluno, status]);
+    });
+    doc.autoTable({
+        head: [['Questão', 'Gabarito', 'Resposta do Aluno', 'Status']], body: rows, startY: 60,
+        headStyles: { fillColor: [79, 70, 229] },
+        didParseCell: function(data) {
+            if (data.column.index === 3 && data.cell.section === 'body') {
+                if (data.cell.raw === 'Incorreto') data.cell.styles.textColor = [239, 68, 68];
+                if (data.cell.raw === 'Correto') data.cell.styles.textColor = [16, 185, 129];
+            }
+        }
+    });
+    doc.save(`Nota_${corr.studentName.replace(/\s+/g, '_')}.pdf`);
+}
+
+function importStudentsExcel(e) {
+  const file = e.target.files[0]; const reader = new FileReader();
+  reader.onload = (evt) => {
+    const rawData = XLSX.utils.sheet_to_json(XLSX.read(new Uint8Array(evt.target.result), {type: 'array'}).Sheets[XLSX.read(new Uint8Array(evt.target.result), {type: 'array'}).SheetNames[0]]);
+    rawData.forEach(row => {
+      const clean = (t) => String(t).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      let n="", m="", t="";
+      Object.keys(row).forEach(k => {
+        let ck = clean(k);
+        if(ck.includes("nome")) n = row[k];
+        else if(ck.includes("matricula") || ck.includes("id")) m = row[k];
+        else if(ck.includes("turma")) t = row[k];
+      });
+      if(n) {
+        if(t && !state.classes.find(c => c.name === t)) state.classes.push({id: Date.now()+Math.random(), name: t, color: "#4F46E5"});
+        state.students.push({name: n, matricula: m || '000', turma: t || 'Geral', email: '---'});
+      }
+    });
+    saveState(); notify("UPLOAD BEM SUCEDIDO!");
+  }; reader.readAsArrayBuffer(file);
+}
+
+function downloadStudentTemplate() {
+    const headers = [{ "Nome Completo": "João Silva", "Matricula": "2026001", "Turma": "9º Ano A", "Email": "joao@email.com" }];
+    const ws = XLSX.utils.json_to_sheet(headers);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Modelo Alunos");
+    XLSX.writeFile(wb, "modelo_alunos_corretoOMR.xlsx");
+}
+
+function openStudentModal() {
+    const sel = document.getElementById('std-class');
+    sel.innerHTML = '<option value="">Geral</option>' + state.classes.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+    openModal('modal-student');
+}
+function saveStudent() {
+    const n = document.getElementById('std-name').value; const m = document.getElementById('std-id').value;
+    const t = document.getElementById('std-class').value; const e = document.getElementById('std-email').value;
+    if(!n) return alert("Preencha o nome.");
+    state.students.push({ name: n, matricula: m || '000', turma: t || 'Geral', email: e || '---' });
+    saveState(); closeModal('modal-student'); notify("Aluno cadastrado!");
+}
+
+function deleteAllStudents() {
+    if(confirm("Deseja apagar TODOS os alunos?")) { state.students = []; saveState(); notify("Lista limpa."); }
+}
+
+function deleteAllClasses() {
+    if(confirm("Deseja apagar TODAS as turmas?")) { state.classes = []; saveState(); notify("Turmas removidas."); }
+}
+
+function deleteAllGabaritos() {
+    if(confirm("Deseja apagar TODAS as máscaras de gabarito?")) { state.gabaritos = []; saveState(); notify("Máscaras removidas."); }
+}
+
+function deleteStudentsByClass() {
+    const turmasDisponiveis = [...new Set(state.students.map(s => s.turma))];
+    if (turmasDisponiveis.length === 0) return alert("Não há alunos cadastrados.");
+    const escolha = prompt("Digite o nome da turma para excluir TODOS os alunos dela:\n\nOpções disponíveis: " + turmasDisponiveis.join(", "));
+    if (escolha && turmasDisponiveis.includes(escolha)) {
+        if (confirm(`Excluir todos os alunos da turma ${escolha}?`)) {
+            state.students = state.students.filter(s => s.turma !== escolha);
+            saveState(); notify(`Alunos da turma ${escolha} removidos.`);
+        }
+    }
+}
+
+function copyClass(id) {
+    const original = state.classes.find(c => c.id == id);
+    if(original) {
+        const copy = {...original, id: Date.now(), name: original.name + " (Cópia)"};
+        state.classes.push(copy); saveState(); notify("Turma copiada!");
+    }
+}
+
+function clearAllCorrections() { if(confirm("Apagar todo o histórico?")) { state.corrections = []; saveState(); } }
+
+function openEditCorrection(id) {
+    const corr = state.corrections.find(c => c.id == id);
+    if(corr) { document.getElementById('edit-corr-id').value = corr.id; document.getElementById('edit-corr-student').value = corr.studentName; document.getElementById('edit-corr-nota').value = corr.nota; openModal('modal-edit-correction'); }
+}
+function saveCorrectionEdit() {
+    const id = document.getElementById('edit-corr-id').value; const nota = document.getElementById('edit-corr-nota').value;
+    const idx = state.corrections.findIndex(c => c.id == id); if(idx > -1) { state.corrections[idx].nota = parseFloat(nota).toFixed(1); saveState(); closeModal('modal-edit-correction'); }
+}
+
+function renderReportTable(type) {
+    currentReportType = type; const container = document.getElementById('reports-container');
+    const gabFilter = document.getElementById('report-gab-filter').value;
+    let html = `<table><thead><tr style="text-align:left; background:var(--gray-50)">`;
+    let chartLabels = []; let datasets = [];
+    let filteredCorrections = state.corrections;
+    if(gabFilter) filteredCorrections = state.corrections.filter(c => c.gabId == gabFilter);
+    if (type === 'turma') {
+        html += `<th>Turma</th><th>Gabarito</th><th>Média</th><th>Aprovados</th></tr></thead><tbody>`;
+        state.classes.forEach(c => {
+            const provasDaTurma = filteredCorrections.filter(corr => state.students.find(s=>s.name===corr.studentName && s.turma===c.name));
+            if(provasDaTurma.length > 0) {
+                const media = (provasDaTurma.reduce((a,b)=>a+parseFloat(b.nota),0) / provasDaTurma.length).toFixed(1);
+                const aprov = provasDaTurma.filter(n => parseFloat(n.nota) >= 6.0).length;
+                html += `<tr><td><b>${c.name}</b></td><td>${gabFilter ? state.gabaritos.find(g=>g.id==gabFilter).name : 'Várias'}</td><td>${media}</td><td>${aprov}</td></tr>`;
+                chartLabels.push(c.name);
+                if(datasets.length === 0) datasets.push({ label: 'Média da Turma', data: [], backgroundColor: '#4F46E5' });
+                datasets[0].data.push(media);
+            }
+        });
+    } else if (type === 'aluno') {
+        html += `<th>Aluno</th><th>Prova (Disciplina)</th><th>Turma</th><th>Nota</th><th>Status</th></tr></thead><tbody>`;
+        const alunosComProva = [...new Set(filteredCorrections.map(c => c.studentName))];
+        alunosComProva.forEach(name => {
+            const provasDoAluno = filteredCorrections.filter(c => c.studentName === name);
+            const studentData = state.students.find(s => s.name === name);
+            chartLabels.push(name.split(' ')[0]);
+            provasDoAluno.forEach(p => {
+                const gabInfo = state.gabaritos.find(g => g.id == p.gabId);
+                const provaComSubj = gabInfo ? `${p.gabName} (${gabInfo.subject || 'Geral'})` : p.gabName;
+                const statusHtml = parseFloat(p.nota) >= 6.0 ? `<span style="color:var(--success); font-weight:bold">Aprovado</span>` : `<span style="color:var(--danger); font-weight:bold">Reprovado</span>`;
+                
+                html += `<tr><td>${name}</td><td>${provaComSubj}</td><td>${studentData ? studentData.turma : '---'}</td><td><b>${p.nota}</b></td><td>${statusHtml}</td></tr>`;
+                if(!gabFilter) {
+                    let ds = datasets.find(d => d.label === provaComSubj);
+                    if(!ds) { ds = { label: provaComSubj, data: new Array(alunosComProva.length).fill(null), backgroundColor: chartColors[datasets.length % 10] }; datasets.push(ds); }
+                    ds.data[chartLabels.indexOf(name.split(' ')[0])] = p.nota;
+                } else {
+                    if(datasets.length === 0) datasets.push({ label: 'Nota', data: [], backgroundColor: '#4F46E5' });
+                    datasets[0].data.push(p.nota);
+                }
+            });
+        });
+    } else if (type === 'questao') {
+        html += `<th>Gabarito</th><th>Média</th><th>Aplicações</th></tr></thead><tbody>`;
+        state.gabaritos.forEach(g => {
+            const provas = state.corrections.filter(c => c.gabId === g.id);
+            if(provas.length > 0) {
+                let media = (provas.reduce((a,b)=>a+parseFloat(b.nota),0)/provas.length).toFixed(1);
+                html += `<tr><td>${g.name} (${g.subject})</td><td>${media}</td><td>${provas.length}</td></tr>`;
+                chartLabels.push(g.name);
+                if(datasets.length === 0) datasets.push({ label: 'Média', data: [], backgroundColor: '#10B981' });
+                datasets[0].data.push(media);
+            }
+        });
+    }
+    container.innerHTML = html + `</tbody></table>`;
+    updateReportChart(chartLabels, datasets, `Relatório: ${type.toUpperCase()}`);
+}
+
+function updateReportChart(labels, datasets, title) {
+    const ctx = document.getElementById('report-chart').getContext('2d');
+    if (reportChartInstance) reportChartInstance.destroy();
+    reportChartInstance = new Chart(ctx, {
+        type: 'bar', data: { labels: labels, datasets: datasets },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: title }, legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, max: 10 } } }
+    });
+}
+
+function openGabaritoModal() {
+  const selMax = document.getElementById('gab-max-score'); selMax.innerHTML = "";
+  for(let i=1; i<=100; i++) selMax.innerHTML += `<option value="${i}" ${i==10?'selected':''}>${i}.0</option>`;
+  const selT = document.getElementById('gab-class'); 
+  selT.innerHTML = '<option value="">Geral (Todas)</option>' + state.classes.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+  document.getElementById('gab-area').value = "";
+  document.getElementById('gab-subject-select').innerHTML = "";
+  generateGabGrid(); openModal('modal-gabarito');
+}
+
+function openLayoutModal() { openModal('modal-layout-pdf'); }
+
+function downloadAnswerSheet() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const numQ = parseInt(document.getElementById('layout-num-questions').value);
+    const model = parseInt(document.getElementById('layout-model').value);
+    const letters = ['A','B','C','D','E'].slice(0, model);
+
+    doc.setFontSize(14); doc.setTextColor(79, 70, 229);
+    doc.text("FOLHA DE RESPOSTAS", 105, 12, { align: 'center' });
+    
+    doc.setLineWidth(0.3); doc.setDrawColor(0);
+    doc.rect(15, 18, 180, 25); 
+    doc.setFontSize(9); doc.setTextColor(0);
+    doc.text("ALUNO:", 18, 25); doc.line(32, 25.5, 190, 25.5);
+    doc.text("MATRÍCULA:", 18, 33); doc.line(38, 33.5, 90, 33.5);
+    doc.text("TURMA:", 95, 33); doc.line(110, 33.5, 140, 33.5);
+    doc.text("DATA:", 145, 33); doc.line(155, 33.5, 190, 33.5);
+    doc.text("ASSINATURA:", 18, 41); doc.line(40, 41.5, 190, 41.5);
+
+    doc.setFontSize(7); doc.setTextColor(100);
+    doc.text("INSTRUÇÕES: Preencha totalmente o círculo da alternativa correta com caneta PRETA.", 105, 48, { align: 'center' });
+    
+    const startY = 58;
+    const startX = 20;
+    const itemHeight = 11.5; 
+    const colWidth = 62;
+    const bubbleRadius = 3.5; 
+
+    doc.setLineWidth(0.5); 
+    doc.setDrawColor(0);
+
+    for (let i = 0; i < numQ; i++) {
+        const col = Math.floor(i / 30);
+        const row = i % 30;
+        const x = startX + (col * colWidth);
+        const y = startY + (row * itemHeight);
+
+        doc.setFontSize(11); doc.setTextColor(0);
+        doc.text(`${(i+1).toString().padStart(2, '0')}`, x - 5, y + 1.2);
+
+        letters.forEach((l, idx) => {
+            const bx = x + 8 + (idx * 10); 
+            doc.circle(bx, y, bubbleRadius, 'S');
+            doc.setFontSize(7);
+            doc.text(l, bx, y + 0.8, { align: 'center' });
+        });
+    }
+
+    doc.save(`Gabarito_${numQ}Q.pdf`);
+    closeModal('modal-layout-pdf');
+    notify("Layout otimizado gerado!");
+}
+
+function generateGabGrid() {
+  const num = parseInt(document.getElementById('gab-num').value) || 0;
+  const letters = ['A','B','C','D','E'].slice(0, parseInt(document.getElementById('gab-model').value));
+  let h = ""; for(let i=1; i<=num; i++) h += `<div style="background:#f4f4f4; padding:5px; border-radius:5px; display:flex; justify-content:space-between;">Q${i} <select class="gab-select" data-q="${i}"><option value="">-</option>${letters.map(l=>`<option value="${l}">${l}</option>`).join('')}</select></div>`;
+  document.getElementById('gab-questions-grid').innerHTML = h;
+}
+
+function saveGabarito() {
+  const ans = {}; document.querySelectorAll('.gab-select').forEach(s => ans[s.dataset.q] = s.value);
+  const area = document.getElementById('gab-area').value;
+  const subj = document.getElementById('gab-subject-select').value;
+  state.gabaritos.push({ 
+    id: Date.now(), name: document.getElementById('gab-name').value || "Sem Nome", 
+    area: area, subject: subj,
+    numQuestions: document.getElementById('gab-num').value, 
+    model: document.getElementById('gab-model').value, 
+    maxScore: document.getElementById('gab-max-score').value, answers: ans 
+  });
+  saveState(); closeModal('modal-gabarito');
+}
+
+function navigate(p) { 
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); 
+  document.querySelectorAll('.page').forEach(pg => pg.classList.remove('active')); 
+  document.getElementById('page-'+p).classList.add('active'); 
+  render(); if(p==='reports') renderReportTable('turma'); 
+}
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+
+function render() {
+  updateStats();
+  document.getElementById('classes-grid').innerHTML = state.classes.map(c => `
+    <div class="class-card">
+        <div class="class-color" style="background:${c.color}; position:absolute; top:0; left:0; right:0; height:5px;"></div>
+        <h4>${c.name}</h4>
+        <div style="margin-top:10px; display:flex; gap:5px;">
+            <button class="btn btn-outline btn-sm" onclick="openEditClass(${c.id})">✏️</button>
+            <button class="btn btn-outline btn-sm" title="Copiar" onclick="copyClass(${c.id})">👯</button>
+            <button class="btn btn-danger btn-sm" onclick="state.classes=state.classes.filter(x=>x.id!=${c.id});saveState();">🗑️</button>
+        </div>
+    </div>`).join('');
+  document.getElementById('students-table').innerHTML = state.students.map((s,i) => `<tr><td style="padding:10px">${s.name}</td><td>${s.matricula}</td><td>${s.turma}</td><td>${s.email}</td><td style="text-align:center"><button class="btn btn-danger btn-sm" onclick="state.students.splice(${i},1);saveState();">🗑️</button></td></tr>`).join('');
+  document.getElementById('results-table').innerHTML = state.corrections.map(c => {
+    const gab = state.gabaritos.find(g => g.id == c.gabId);
+    const nomeComDisc = gab ? `${c.gabName} (${gab.subject || 'Geral'})` : c.gabName;
+    return `<tr><td style="padding:10px">${c.studentName}</td><td>${nomeComDisc}</td><td><b>${c.nota}</b></td><td>${c.data}</td><td><button class="btn btn-primary btn-sm" onclick="exportStudentPDF(${c.id})">📄 PDF</button> <button class="btn btn-outline btn-sm" onclick="openEditCorrection(${c.id})">✏️</button> <button class="btn btn-danger btn-sm" onclick="state.corrections=state.corrections.filter(x=>x.id!=${c.id});saveState();">🗑️</button></td></tr>`;
+  }).join('');
+  const classFilter = document.getElementById('scan-class-filter');
+  classFilter.innerHTML = '<option value="">Todas as Turmas</option>' + state.classes.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+  const gabOptions = '<option value="">Todas as Provas</option>' + state.gabaritos.map(g => `<option value="${g.id}">${g.name} (${g.subject || 'Geral'})</option>`).join('');
+  document.getElementById('report-gab-filter').innerHTML = gabOptions;
+  document.getElementById('scan-gabarito-select').innerHTML = '<option value="">Escolha uma máscara...</option>' + state.gabaritos.map(g => `<option value="${g.id}">${g.name} (${g.subject || 'Geral'})</option>`).join('');
+  filterStudentsByClass();
+  document.getElementById('gabaritos-list').innerHTML = state.gabaritos.map(g => `
+    <div class="card" style="padding:15px; border-left: 5px solid var(--primary)">
+        <h4>${g.name}</h4>
+        <p style="font-size:11px; color:var(--gray-600); margin:4px 0"><b>${g.area || 'Área N/A'}</b> - ${g.subject || 'Geral'}</p>
+        <small>Questões: ${g.numQuestions}</small><br>
+        <button class="btn btn-danger btn-sm" style="margin-top:10px" onclick="state.gabaritos=state.gabaritos.filter(x=>x.id!=${g.id});saveState();">🗑️</button>
+    </div>`).join('');
+}
+
+function openClassModal() {
+    document.getElementById('edit-class-id').value = "";
+    document.getElementById('class-name').value = "";
+    document.getElementById('class-color').value = "#4F46E5";
+    openModal('modal-class');
+}
+
+function openEditClass(id) { 
+    const c = state.classes.find(x => x.id == id); 
+    document.getElementById('edit-class-id').value = id; 
+    document.getElementById('class-name').value = c.name; 
+    document.getElementById('class-color').value = c.color; 
+    openModal('modal-class'); 
+}
+
+function saveClass() { 
+    const id = document.getElementById('edit-class-id').value; 
+    const name = document.getElementById('class-name').value;
+    const col = document.getElementById('class-color').value;
+    if(!name) return alert("Dê um nome à turma.");
+    if(id) {
+        const idx = state.classes.findIndex(x => x.id == id); 
+        state.classes[idx].name = name; state.classes[idx].color = col; 
+    } else {
+        state.classes.push({ id: Date.now(), name, color: col });
+    }
+    saveState(); closeModal('modal-class'); 
+}
+
+function notify(m) { const n = document.getElementById('notification'); n.innerText = m; n.style.display="block"; setTimeout(()=>n.style.display="none", 3000); }
+window.onload = function() { render(); loadStateFromServer(); };
+
+/* BLOCO ADICIONAL: Correção da Importação de E-mails 
+   Esta função substitui a original para garantir o mapeamento da coluna Email.
+*/
+function importStudentsExcel(e) {
+  const file = e.target.files[0]; 
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const data = new Uint8Array(evt.target.result);
+    const workbook = XLSX.read(data, {type: 'array'});
+    const sheetName = workbook.SheetNames[0];
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    
+    rawData.forEach(row => {
+      const clean = (t) => String(t).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      let n="", m="", t="", em="---";
+      
+      Object.keys(row).forEach(k => {
+        let ck = clean(k);
+        if(ck.includes("nome")) n = row[k];
+        else if(ck.includes("matricula") || ck.includes("id")) m = row[k];
+        else if(ck.includes("turma")) t = row[k];
+        else if(ck.includes("email") || ck.includes("e-mail")) em = row[k];
+      });
+      
+      if(n) {
+        if(t && !state.classes.find(c => c.name === t)) {
+          state.classes.push({id: Date.now() + Math.random(), name: t, color: "#4F46E5"});
+        }
+        state.students.push({
+          name: n, 
+          matricula: m || '000', 
+          turma: t || 'Geral', 
+          email: em || '---'
+        });
+      }
+    });
+    saveState(); 
+    notify("UPLOAD BEM SUCEDIDO COM E-MAILS!");
+  }; 
+  reader.readAsArrayBuffer(file);
+}
+
+/* ============================================
+   NOVA FUNCIONALIDADE: LIMPAR FOTO APÓS SALVAR
+   ============================================ */
+function limparFormularioEscaneamento() {
+    document.getElementById('file-input').value = '';
+    document.getElementById('omr-preview').style.display = 'none';
+    document.getElementById('omr-preview').src = '';
+    document.getElementById('omr-status').innerText = 'Selecione a foto da prova...';
+    document.getElementById('bubble-sheet-container').innerHTML = '';
+    document.getElementById('score-result').innerText = '';
+    document.getElementById('btn-save').style.display = 'none';
+    detectedRawAnswers = {};
+    const canvas = document.getElementById('omr-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+(function() {
+    const salvarOriginal = window.salvarResultadoFinal;
+    window.salvarResultadoFinal = function() {
+        salvarOriginal();
+        limparFormularioEscaneamento();
+    };
+})();
+</script>
+</body>
+</html>
